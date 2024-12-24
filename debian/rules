@@ -318,7 +318,7 @@ ifeq ($(BUILD_NUMPY), yes)
 endif
 
 override_dh_gencontrol:
-	dh_gencontrol -- -V'gxx:major=$(shell dpkg-query -f '$${version}' -W g++ | sed 's/.*://;s/\..*//')'
+	dh_gencontrol -- -V'gxx:major=$(shell g++ -dumpversion)'
 
 $(b2):
 	cd tools/build && bison -y -d -o src/engine/jamgram.cpp src/engine/jamgram.y
