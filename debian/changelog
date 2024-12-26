@@ -1,3 +1,10 @@
+boost1.83 (1.83.0-4deepin1) unstable; urgency=medium
+
+  * fix gcc version detection
+  * remove t64
+
+ -- Chang Yang <yangchang@deepin.org>  Thu, 26 Dec 2024 10:11:17 +0800
+
 boost1.83 (1.83.0-4) unstable; urgency=medium
 
   [ Samuel Thibault ]
