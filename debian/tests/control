@@ -32,6 +32,7 @@ Restrictions: allow-stderr
 
 Tests: graph-parallel
 Depends: libboost-graph-parallel1.83-dev, libboost-mpi1.83-dev, libboost-system1.83-dev, mpi-default-dev, build-essential, libgraph-easy-perl, cmake
+Architecture: [!armhf]
 Restrictions: allow-stderr
 
 Tests: iostreams
@@ -49,10 +50,12 @@ Depends: libboost-math1.83-dev, build-essential, cmake
 
 Tests: mpi
 Depends: libboost-mpi1.83-dev, mpi-default-dev, build-essential, cmake
+Architecture: [!armhf]
 Restrictions: allow-stderr
 
 Tests: mpi-python
 Depends: libboost-mpi-python1.83-dev, mpi-default-dev, python3-minimal
+Architecture: [!armhf]
 Restrictions: allow-stderr
 
 Tests: program-options

@@ -6,3 +6,6 @@ fix_extension.patch
 30.patch
 40.patch
 50.patch
+60.patch
+70-boost-causing-ftbfs-signal2-part1.patch
+71-boost-causing-ftbfs-signal2-part2.patch
