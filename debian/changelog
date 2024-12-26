@@ -1,3 +1,49 @@
+boost1.83 (1.83.0-4) unstable; urgency=medium
+
+  [ Samuel Thibault ]
+  * control: Add hurd-amd64 for context, coroutine, fiber packages.
+  * [a2dab5e] control: Add hurd-amd64 for context, coroutine, fiber packages.
+
+  [ Heinrich Schuchardt ]
+  * [62a479e] Fix autopkgtests fail on armhf. (Closes: #1079106)
+
+  [ Anton Gladky ]
+  * [49b0d7f] Update the minimal cmake version for autopkgtest to 3.18.
+              (Closes: #1087853)
+
+ -- Anton Gladky <gladk@debian.org>  Sat, 07 Dec 2024 20:39:34 +0100
+
+boost1.83 (1.83.0-3.2) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Additional workaround for broken architecture detection under x32
+    (Closes: #1079358)
+
+ -- Mattias Ellert <mattias.ellert@physics.uu.se>  Thu, 22 Aug 2024 14:09:24 +0200
+
+boost1.83 (1.83.0-3.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Fix "Boost.Signals2 causes FTBFS", cherry-picking upstream patch
+   (Closes: #1056100)
+  * Fix "autopkgtest regression with CMake 3.30+", enforcing the new CMP0167
+    policy. (Closes: #1076426)
+
+ -- Tobias Frost <tobi@debian.org>  Tue, 30 Jul 2024 09:09:13 +0200
+
+boost1.83 (1.83.0-3) unstable; urgency=medium
+
+  * [4b317f3] Add upstream fix for dogecoin. (Closes: #1059133)
+
+ -- Anton Gladky <gladk@debian.org>  Mon, 27 May 2024 06:59:36 +0200
+
+boost1.83 (1.83.0-2.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Rename libraries for 64-bit time_t transition.  Closes: #1062027
+
+ -- Steve Langasek <vorlon@debian.org>  Wed, 28 Feb 2024 04:40:55 +0000
+
 boost1.83 (1.83.0-2) unstable; urgency=medium
 
   * [139123a] Add dep to libboost1.83-all-dev on libboost-url1.83-dev. (Closes: #1058948)

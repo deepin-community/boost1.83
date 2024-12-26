@@ -11,7 +11,7 @@ mkdir -p $WORKDIR/build
 cp debian/tests/srcs/system/* $WORKDIR/src/
 
 cd $WORKDIR/build
-cmake ./../src
+cmake -DCMAKE_POLICY_DEFAULT_CMP0167=NEW ./../src
 make
 
 echo "build: OK"

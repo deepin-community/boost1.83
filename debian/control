@@ -6,7 +6,7 @@ Maintainer: Debian Boost Team <team+boost@tracker.debian.org>
 Uploaders:
  Giovanni Mascellani <gio@debian.org>,
  Anton Gladky <gladk@debian.org>
-Build-Depends: debhelper-compat (= 12), dpkg-dev (>= 1.16.1~), dctrl-tools, chrpath,
+Build-Depends: dpkg-dev (>= 1.22.5), debhelper-compat (= 12), dpkg-dev (>= 1.16.1~), dctrl-tools, chrpath,
  zlib1g-dev, libbz2-dev, liblzma-dev, libzstd-dev, libicu-dev (>= 63.1), mpi-default-dev,
  bison, flex, docbook-to-man, help2man, xsltproc, doxygen,
  docbook-xsl, docbook-xml, texlive-latex-base, ghostscript,
@@ -28,12 +28,12 @@ Suggests: libboost1.83-doc,
  libboost-atomic1.83-dev,
  libboost-chrono1.83-dev,
  libboost-container1.83-dev,
- libboost-context1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-context1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
  libboost-contract1.83-dev,
- libboost-coroutine1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-coroutine1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
  libboost-date-time1.83-dev,
  libboost-exception1.83-dev,
- libboost-fiber1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-fiber1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
  libboost-filesystem1.83-dev,
  libboost-graph-parallel1.83-dev,
  libboost-graph1.83-dev,
@@ -114,11 +114,11 @@ Depends: ${misc:Depends},
  libboost-atomic1.83-dev,
  libboost-chrono1.83-dev,
  libboost-container1.83-dev,
- libboost-context1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
- libboost-coroutine1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-context1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-coroutine1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
  libboost-date-time1.83-dev,
  libboost-exception1.83-dev,
- libboost-fiber1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
+ libboost-fiber1.83-dev [i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x],
  libboost-filesystem1.83-dev,
  libboost-graph-parallel1.83-dev,
  libboost-graph1.83-dev,
@@ -219,7 +219,10 @@ Description: atomic data types, operations, and memory ordering constraints
  locking.
 Conflicts: libboost-atomic1.53-dev, libboost-atomic1.54-dev, libboost-atomic1.55-dev, libboost-atomic1.57-dev, libboost-atomic1.58-dev, libboost-atomic1.60-dev, libboost-atomic1.61-dev, libboost-atomic1.62-dev, libboost-atomic1.63-dev, libboost-atomic1.65-dev, libboost-atomic1.67-dev, libboost-atomic1.70-dev, libboost-atomic1.71-dev, libboost-atomic1.74-dev, libboost-atomic1.80-dev, libboost-atomic1.81-dev
 
-Package: libboost-chrono1.83.0
+Package: libboost-chrono1.83.0t64
+Provides: ${t64:Provides}
+Replaces: libboost-chrono1.83.0
+Breaks: libboost-chrono1.83.0 (<< ${source:Version})
 Homepage: http://www.boost.org/libs/chrono/
 Architecture: any
 Multi-Arch: same
@@ -269,7 +272,7 @@ Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
  libboost1.83-dev (= ${binary:Version}),
- libboost-chrono1.83.0 (= ${binary:Version})
+ libboost-chrono1.83.0t64 (= ${binary:Version})
 Conflicts: libboost-chrono1.48-dev, libboost-chrono1.49-dev, libboost-chrono1.50-dev, libboost-chrono1.52-dev, libboost-chrono1.53-dev, libboost-chrono1.54-dev, libboost-chrono1.55-dev, libboost-chrono1.57-dev, libboost-chrono1.58-dev, libboost-chrono1.60-dev, libboost-chrono1.61-dev, libboost-chrono1.62-dev, libboost-chrono1.63-dev, libboost-chrono1.65-dev, libboost-chrono1.67-dev, libboost-chrono1.70-dev, libboost-chrono1.71-dev, libboost-chrono1.74-dev, libboost-chrono1.80-dev, libboost-chrono1.81-dev
 Description: C++ representation of time duration, time point, and clocks
  This package forms part of the Boost C++ Libraries collection.
@@ -380,7 +383,7 @@ Conflicts: libboost-container1.65-dev, libboost-container1.67-dev, libboost-cont
 
 Package: libboost-context1.83.0
 Homepage: http://www.boost.org/libs/context/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Pre-Depends: ${misc:Pre-Depends}
@@ -399,7 +402,7 @@ Description: provides a sort of cooperative multitasking on a single thread
 
 Package: libboost-context1.83-dev
 Homepage: http://www.boost.org/libs/context/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
@@ -455,7 +458,7 @@ Conflicts: libboost-contract1.67-dev, libboost-contract1.70-dev, libboost-contra
 
 Package: libboost-coroutine1.83.0
 Homepage: http://www.boost.org/libs/coroutine/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Pre-Depends: ${misc:Pre-Depends}
@@ -479,7 +482,7 @@ Description: provides a sort of cooperative multitasking on a single thread
 
 Package: libboost-coroutine1.83-dev
 Homepage: http://www.boost.org/libs/coroutine/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
@@ -550,7 +553,7 @@ Conflicts: libboost-exception1.50-dev, libboost-exception1.52-dev, libboost-exce
 
 Package: libboost-fiber1.83.0
 Homepage: http://www.boost.org/libs/fiber/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Pre-Depends: ${misc:Pre-Depends}
@@ -579,7 +582,7 @@ Description: cooperatively-scheduled micro-/userland-threads
 
 Package: libboost-fiber1.83-dev
 Homepage: http://www.boost.org/libs/fiber/
-Architecture: i386 hurd-i386 kfreebsd-i386 amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
+Architecture: i386 hurd-i386 kfreebsd-i386 amd64 hurd-amd64 kfreebsd-amd64 armel armhf arm64 loong64 mips mipsel mips64el powerpc ppc64el riscv64 s390x
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},

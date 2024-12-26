@@ -69,11 +69,11 @@ boost_suffixes = $(if $(boost_suffixes_$(1)), $(boost_suffixes_$(1)),"")
 mk_base_name = usr/lib/$(DEB_HOST_MULTIARCH)/libboost_$(subst -,_,$(1))$(2)
 mk_cmake_name = usr/lib/$(DEB_HOST_MULTIARCH)/cmake/boost_$(subst -,_,$(1))-$(SOVERSION)/
 
+t64_suffix_chrono = t64
 # Input: component
 # Return: package name for shared library or development
-mk_pkg_lib = libboost-$(1)$(SOVERSION)
+mk_pkg_lib = libboost-$(1)$(SOVERSION)$(t64_suffix_$(1))
 mk_pkg_dev = libboost-$(1)$(PKGVERSION)-dev
-
 # Helpers to generate debhelper input filenames.
 # Input: component
 # Return: prefix to debhelper filenames
@@ -182,7 +182,9 @@ JAM_DOC = $(b2) $(JOBS) -q -d2 --ignore-site-config --user-config=$(CURDIR)/user
 override_dh_auto_configure: user-config.jam make-debhelper
 ifeq ($(DEB_BUILD_ARCH), x32)
 	cp tools/build/src/tools/gcc.jam tools/build/src/tools/gcc.jam.bak
-	sed -i -e 's|^.*compile-link-flags.*-m32.*|#\0|g' tools/build/src/tools/gcc.jam
+	sed -i -e 's|^.*compile-link-flags.*-m32.*|#\0|g' \
+	       -e 's|^.*toolset.flags.*-march=i686.*|#\0|g' \
+		tools/build/src/tools/gcc.jam
 endif
 
 override_dh_auto_build-common: $(b2) b2.1 bjam.1

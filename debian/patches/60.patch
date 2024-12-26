@@ -1,0 +1,26 @@
+From 4384bf0ecb9eb13cdc1727b7c43d085445e37c3d Mon Sep 17 00:00:00 2001
+From: NatUni <155886653+NatUni@users.noreply.github.com>
+Date: Tue, 9 Jan 2024 17:47:56 -0500
+Subject: [PATCH] Fix issue documented in Debian bug #1059133
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+I am surely out of my depth here, but this Works4Me™. See: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1059133
+---
+ libs/function/include/boost/function/function_base.hpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+Index: boost/libs/function/include/boost/function/function_base.hpp
+===================================================================
+--- boost.orig/libs/function/include/boost/function/function_base.hpp
++++ boost/libs/function/include/boost/function/function_base.hpp
+@@ -648,7 +648,7 @@ public:
+                       detail::function::check_functor_type_tag);
+       // GCC 2.95.3 gets the CV qualifiers wrong here, so we
+       // can't do the static_cast that we should do.
+-      return static_cast<const Functor*>(type_result.members.obj_ptr);
++      return reinterpret_cast<const Functor*>(type_result.members.obj_ptr);
+     }
+ 
+   template<typename F>
