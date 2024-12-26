@@ -69,10 +69,9 @@ boost_suffixes = $(if $(boost_suffixes_$(1)), $(boost_suffixes_$(1)),"")
 mk_base_name = usr/lib/$(DEB_HOST_MULTIARCH)/libboost_$(subst -,_,$(1))$(2)
 mk_cmake_name = usr/lib/$(DEB_HOST_MULTIARCH)/cmake/boost_$(subst -,_,$(1))-$(SOVERSION)/
 
-t64_suffix_chrono = t64
 # Input: component
 # Return: package name for shared library or development
-mk_pkg_lib = libboost-$(1)$(SOVERSION)$(t64_suffix_$(1))
+mk_pkg_lib = libboost-$(1)$(SOVERSION)
 mk_pkg_dev = libboost-$(1)$(PKGVERSION)-dev
 # Helpers to generate debhelper input filenames.
 # Input: component
@@ -320,7 +319,7 @@ ifeq ($(BUILD_NUMPY), yes)
 endif
 
 override_dh_gencontrol:
-	dh_gencontrol -- -V'gxx:major=$(shell dpkg-query -f '$${version}' -W g++ | sed 's/.*://;s/\..*//')'
+	dh_gencontrol -- -V'gxx:major=$(shell g++ -dumpversion)'
 
 $(b2):
 	cd tools/build && bison -y -d -o src/engine/jamgram.cpp src/engine/jamgram.y

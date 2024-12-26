@@ -219,10 +219,7 @@ Description: atomic data types, operations, and memory ordering constraints
  locking.
 Conflicts: libboost-atomic1.53-dev, libboost-atomic1.54-dev, libboost-atomic1.55-dev, libboost-atomic1.57-dev, libboost-atomic1.58-dev, libboost-atomic1.60-dev, libboost-atomic1.61-dev, libboost-atomic1.62-dev, libboost-atomic1.63-dev, libboost-atomic1.65-dev, libboost-atomic1.67-dev, libboost-atomic1.70-dev, libboost-atomic1.71-dev, libboost-atomic1.74-dev, libboost-atomic1.80-dev, libboost-atomic1.81-dev
 
-Package: libboost-chrono1.83.0t64
-Provides: ${t64:Provides}
-Replaces: libboost-chrono1.83.0
-Breaks: libboost-chrono1.83.0 (<< ${source:Version})
+Package: libboost-chrono1.83.0
 Homepage: http://www.boost.org/libs/chrono/
 Architecture: any
 Multi-Arch: same
@@ -272,7 +269,7 @@ Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
  libboost1.83-dev (= ${binary:Version}),
- libboost-chrono1.83.0t64 (= ${binary:Version})
+ libboost-chrono1.83.0 (= ${binary:Version})
 Conflicts: libboost-chrono1.48-dev, libboost-chrono1.49-dev, libboost-chrono1.50-dev, libboost-chrono1.52-dev, libboost-chrono1.53-dev, libboost-chrono1.54-dev, libboost-chrono1.55-dev, libboost-chrono1.57-dev, libboost-chrono1.58-dev, libboost-chrono1.60-dev, libboost-chrono1.61-dev, libboost-chrono1.62-dev, libboost-chrono1.63-dev, libboost-chrono1.65-dev, libboost-chrono1.67-dev, libboost-chrono1.70-dev, libboost-chrono1.71-dev, libboost-chrono1.74-dev, libboost-chrono1.80-dev, libboost-chrono1.81-dev
 Description: C++ representation of time duration, time point, and clocks
  This package forms part of the Boost C++ Libraries collection.
