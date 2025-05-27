@@ -9,3 +9,4 @@ fix_extension.patch
 60.patch
 70-boost-causing-ftbfs-signal2-part1.patch
 71-boost-causing-ftbfs-signal2-part2.patch
+0001-feat-add-sw64-support.patch
