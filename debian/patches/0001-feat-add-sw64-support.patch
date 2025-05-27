@@ -1,0 +1,1695 @@
+From f1f6c5f43fd55e78510352a144447ebefd436128 Mon Sep 17 00:00:00 2001
+From: hudeng <hudeng@deepin.org>
+Date: Tue, 27 May 2025 18:18:41 +0800
+Subject: [PATCH] feat: add sw64 support
+
+---
+ .../atomic/detail/caps_arch_gcc_sw64.hpp      |  32 +
+ .../atomic/detail/core_arch_ops_gcc_sw64.hpp  | 937 ++++++++++++++++++
+ .../atomic/detail/fence_arch_ops_gcc_sw64.hpp |  53 +
+ .../include/boost/atomic/detail/platform.hpp  |   4 +
+ libs/atomic/test/lockfree.cpp                 |  14 +
+ libs/config/checks/architecture/sw64.cpp      |  11 +
+ libs/config/test/config_info.cpp              |   1 +
+ libs/context/CMakeLists.txt                   |   7 +-
+ libs/context/build/Jamfile.v2                 |  28 +-
+ libs/context/build/architecture.jam           |   4 +
+ .../context/src/asm/jump_sw64_aapcs_elf_gas.S |  86 ++
+ .../context/src/asm/make_sw64_aapcs_elf_gas.S |  37 +
+ .../src/asm/ontop_sw64_aapcs_elf_gas.S        |  85 ++
+ .../include/boost/fiber/detail/cpu_relax.hpp  |   2 +
+ .../interval/detail/sw64_rounding_control.hpp |  93 ++
+ .../boost/numeric/interval/hw_rounding.hpp    |   2 +
+ .../include/boost/predef/architecture/sw64.h  |  52 +
+ tools/build/src/engine/jam.h                  |   5 +
+ .../tools/features/architecture-feature.jam   |   5 +-
+ .../features/instruction-set-feature.jam      |   3 +
+ 20 files changed, 1456 insertions(+), 5 deletions(-)
+ create mode 100644 libs/atomic/include/boost/atomic/detail/caps_arch_gcc_sw64.hpp
+ create mode 100644 libs/atomic/include/boost/atomic/detail/core_arch_ops_gcc_sw64.hpp
+ create mode 100644 libs/atomic/include/boost/atomic/detail/fence_arch_ops_gcc_sw64.hpp
+ create mode 100644 libs/config/checks/architecture/sw64.cpp
+ create mode 100644 libs/context/src/asm/jump_sw64_aapcs_elf_gas.S
+ create mode 100644 libs/context/src/asm/make_sw64_aapcs_elf_gas.S
+ create mode 100644 libs/context/src/asm/ontop_sw64_aapcs_elf_gas.S
+ create mode 100644 libs/numeric/interval/include/boost/numeric/interval/detail/sw64_rounding_control.hpp
+ create mode 100644 libs/predef/include/boost/predef/architecture/sw64.h
+
+diff --git a/libs/atomic/include/boost/atomic/detail/caps_arch_gcc_sw64.hpp b/libs/atomic/include/boost/atomic/detail/caps_arch_gcc_sw64.hpp
+new file mode 100644
+index 00000000..fb1c0035
+--- /dev/null
++++ b/libs/atomic/include/boost/atomic/detail/caps_arch_gcc_sw64.hpp
+@@ -0,0 +1,32 @@
++/*
++ * Distributed under the Boost Software License, Version 1.0.
++ * (See accompanying file LICENSE_1_0.txt or copy at
++ * http://www.boost.org/LICENSE_1_0.txt)
++ *
++ * Copyright (c) 2014 Miao Changwei, Uniontech.
++ */
++/*!
++ * \file   atomic/detail/caps_arch_gcc_sw64.hpp
++ *
++ * This header defines feature capabilities macros
++ */
++
++#ifndef BOOST_ATOMIC_DETAIL_CAPS_ARCH_GCC_SW64_HPP_INCLUDED_
++#define BOOST_ATOMIC_DETAIL_CAPS_ARCH_GCC_SW64_HPP_INCLUDED_
++
++#include <boost/atomic/detail/config.hpp>
++
++#ifdef BOOST_HAS_PRAGMA_ONCE
++#pragma once
++#endif
++
++#define BOOST_ATOMIC_INT8_LOCK_FREE 2
++#define BOOST_ATOMIC_INT16_LOCK_FREE 2
++#define BOOST_ATOMIC_INT32_LOCK_FREE 2
++#define BOOST_ATOMIC_INT64_LOCK_FREE 2
++#define BOOST_ATOMIC_POINTER_LOCK_FREE 2
++
++#define BOOST_ATOMIC_THREAD_FENCE 2
++#define BOOST_ATOMIC_SIGNAL_FENCE 2
++
++#endif // BOOST_ATOMIC_DETAIL_CAPS_ARCH_GCC_SW64_HPP_INCLUDED_
+diff --git a/libs/atomic/include/boost/atomic/detail/core_arch_ops_gcc_sw64.hpp b/libs/atomic/include/boost/atomic/detail/core_arch_ops_gcc_sw64.hpp
+new file mode 100644
+index 00000000..1f702548
+--- /dev/null
++++ b/libs/atomic/include/boost/atomic/detail/core_arch_ops_gcc_sw64.hpp
+@@ -0,0 +1,937 @@
++/*
++ * Distributed under the Boost Software License, Version 1.0.
++ * (See accompanying file LICENSE_1_0.txt or copy at
++ * http://www.boost.org/LICENSE_1_0.txt)
++ *
++ * Copyright (c) 2014 Andrey Semashev
++ */
++/*!
++ * \file   atomic/detail/core_arch_ops_gcc_sw64.hpp
++ *
++ * This header contains implementation of the \c core_arch_operations template.
++ */
++
++#ifndef BOOST_ATOMIC_DETAIL_CORE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
++#define BOOST_ATOMIC_DETAIL_CORE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
++
++#include <cstddef>
++#include <boost/memory_order.hpp>
++#include <boost/atomic/detail/config.hpp>
++#include <boost/atomic/detail/storage_traits.hpp>
++#include <boost/atomic/detail/core_arch_operations_fwd.hpp>
++#include <boost/atomic/detail/header.hpp>
++
++#ifdef BOOST_HAS_PRAGMA_ONCE
++#pragma once
++#endif
++
++namespace boost {
++namespace atomics {
++namespace detail {
++
++/*
++    NB: The most natural thing would be to write the increment/decrement
++    operators along the following lines:
++
++    __asm__ __volatile__
++    (
++        "1: lldw %0,%2 \n"
++        "ldi %1, 1\n"
++        "wr_f %1\n"
++        "addw %0,1,%0 \n"
++        "lstw %0,%2 \n"
++        "rd_f %1\n"
++        "beq %1,1b\n"
++        : "=&r" (tmp), "=&r" (flag);
++        : "m" (value)
++        : "cc"
++    );
++*/
++
++struct core_arch_operations_gcc_sw64_base
++{
++    static BOOST_CONSTEXPR_OR_CONST bool full_cas_based = false;
++    static BOOST_CONSTEXPR_OR_CONST bool is_always_lock_free = true;
++
++    static BOOST_FORCEINLINE void fence_before(memory_order order) BOOST_NOEXCEPT
++    {
++        if ((static_cast< unsigned int >(order) & static_cast< unsigned int >(memory_order_release)) != 0u)
++            __asm__ __volatile__ ("memb" ::: "memory");
++    }
++
++    static BOOST_FORCEINLINE void fence_after(memory_order order) BOOST_NOEXCEPT
++    {
++        if ((static_cast< unsigned int >(order) & (static_cast< unsigned int >(memory_order_consume) | static_cast< unsigned int >(memory_order_acquire))) != 0u)
++            __asm__ __volatile__ ("memb" ::: "memory");
++    }
++
++    static BOOST_FORCEINLINE void fence_after_store(memory_order order) BOOST_NOEXCEPT
++    {
++        if (order == memory_order_seq_cst)
++            __asm__ __volatile__ ("memb" ::: "memory");
++    }
++};
++
++
++template< bool Signed, bool Interprocess >
++struct core_arch_operations< 4u, Signed, Interprocess > :
++    public core_arch_operations_gcc_sw64_base
++{
++    typedef typename storage_traits< 4u >::type storage_type;
++
++    static BOOST_CONSTEXPR_OR_CONST std::size_t storage_size = 4u;
++    static BOOST_CONSTEXPR_OR_CONST std::size_t storage_alignment = 4u;
++    static BOOST_CONSTEXPR_OR_CONST bool is_signed = Signed;
++    static BOOST_CONSTEXPR_OR_CONST bool is_interprocess = Interprocess;
++
++    static BOOST_FORCEINLINE void store(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        fence_before(order);
++        storage = v;
++        fence_after_store(order);
++    }
++
++    static BOOST_FORCEINLINE storage_type load(storage_type const volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type v = storage;
++        fence_after(order);
++        return v;
++    }
++
++    static BOOST_FORCEINLINE storage_type exchange(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, tmp, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "mov %4, %1\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (tmp),       // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE bool compare_exchange_weak(
++        storage_type volatile& storage, storage_type& expected, storage_type desired, memory_order success_order, memory_order failure_order) BOOST_NOEXCEPT
++    {
++        fence_before(success_order);
++        int success;
++        storage_type current;
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %2, %4\n\t"                 // current = *(&storage)
++            "cmpeq %2, %0, %3\n\t"            // success = current == expected
++            "wr_f %3\n\t"                     // lock_flag = success
++            "mov %2, %0\n\t"                  // expected = current
++            "beq %3, 2f\n\t"                  // if (success == 0) goto end
++            "lstw %1, %4\n\t"                 // storage = desired
++            "rd_f %3\n\t"                     // success = lock_success
++            "2:\n\t"
++            : "+r" (expected),   // %0
++              "+r" (desired),    // %1
++              "=&r" (current),   // %2
++              "=&r" (success)    // %3
++            : "m" (storage)      // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        if (success)
++            fence_after(success_order);
++        else
++            fence_after(failure_order);
++        return !!success;
++    }
++
++    static BOOST_FORCEINLINE bool compare_exchange_strong(
++        storage_type volatile& storage, storage_type& expected, storage_type desired, memory_order success_order, memory_order failure_order) BOOST_NOEXCEPT
++    {
++        int success;
++        storage_type current, tmp;
++        fence_before(success_order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "mov %5, %1\n\t"                  // tmp = desired
++            "ldlw %2, %4\n\t"                 // current = *(&storage)
++            "wr_f %3\n\t"                     // lock_flag = success
++            "cmpeq %2, %0, %3\n\t"            // success = current == expected
++            "mov %2, %0\n\t"                  // expected = current
++            "beq %3, 2f\n\t"                  // if (success == 0) goto end
++            "lstw %1, %4\n\t"                 // storage = tmp
++            "rd_f %3\n\t"                     // success = lock_success
++            "beq %3, 3f\n\t"                  // if (tmp == 0) goto retry
++            "2:\n\t"
++
++            ".subsection 2\n\t"
++            "3: br 1b\n\t"
++            ".previous\n\t"
++
++            : "+r" (expected),   // %0
++              "=&r" (tmp),       // %1
++              "=&r" (current),   // %2
++              "=&r" (success)    // %3
++            : "m" (storage),     // %4
++              "r" (desired)      // %5
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        if (success)
++            fence_after(success_order);
++        else
++            fence_after(failure_order);
++        return !!success;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addw %0, %4, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subw %0, %4, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_and(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "and %0, %4, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_or(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "bis %0, %4, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_xor(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %2\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "xor %0, %3, %1\n\t"
++            "lstw %1, %2\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE bool test_and_set(storage_type volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        return !!exchange(storage, (storage_type)1, order);
++    }
++
++    static BOOST_FORCEINLINE void clear(storage_type volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        store(storage, 0, order);
++    }
++};
++
++
++template< bool Interprocess >
++struct core_arch_operations< 1u, false, Interprocess > :
++    public core_arch_operations< 4u, false, Interprocess >
++{
++    typedef core_arch_operations< 4u, false, Interprocess > base_type;
++    typedef typename base_type::storage_type storage_type;
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addw %0, %4, %1\n\t"
++            "zapnot %1, 1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subw %0, %4, %1\n\t"
++            "zapnot %1, 1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++};
++
++template< bool Interprocess >
++struct core_arch_operations< 1u, true, Interprocess > :
++    public core_arch_operations< 4u, true, Interprocess >
++{
++    typedef core_arch_operations< 4u, true, Interprocess > base_type;
++    typedef typename base_type::storage_type storage_type;
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addw %0, %4, %1\n\t"
++            "sextb %1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subw %0, %4, %1\n\t"
++            "sextb %1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++};
++
++
++template< bool Interprocess >
++struct core_arch_operations< 2u, false, Interprocess > :
++    public core_arch_operations< 4u, false, Interprocess >
++{
++    typedef core_arch_operations< 4u, false, Interprocess > base_type;
++    typedef typename base_type::storage_type storage_type;
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addw %0, %4, %1\n\t"
++            "zapnot %1, 3, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subw %0, %4, %1\n\t"
++            "zapnot %1, 3, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++};
++
++template< bool Interprocess >
++struct core_arch_operations< 2u, true, Interprocess > :
++    public core_arch_operations< 4u, true, Interprocess >
++{
++    typedef core_arch_operations< 4u, true, Interprocess > base_type;
++    typedef typename base_type::storage_type storage_type;
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addw %0, %4, %1\n\t"
++            "sexth %1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        base_type::fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldw %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subw %0, %4, %1\n\t"
++            "sexth %1, %1\n\t"
++            "lstw %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        base_type::fence_after(order);
++        return original;
++    }
++};
++
++
++template< bool Signed, bool Interprocess >
++struct core_arch_operations< 8u, Signed, Interprocess > :
++    public core_arch_operations_gcc_sw64_base
++{
++    typedef typename storage_traits< 8u >::type storage_type;
++
++    static BOOST_CONSTEXPR_OR_CONST std::size_t storage_size = 8u;
++    static BOOST_CONSTEXPR_OR_CONST std::size_t storage_alignment = 8u;
++    static BOOST_CONSTEXPR_OR_CONST bool is_signed = Signed;
++    static BOOST_CONSTEXPR_OR_CONST bool is_interprocess = Interprocess;
++
++    static BOOST_FORCEINLINE void store(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        fence_before(order);
++        storage = v;
++        fence_after_store(order);
++    }
++
++    static BOOST_FORCEINLINE storage_type load(storage_type const volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type v = storage;
++        fence_after(order);
++        return v;
++    }
++
++    static BOOST_FORCEINLINE storage_type exchange(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, tmp, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "mov %4, %1\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (tmp),       // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE bool compare_exchange_weak(
++        storage_type volatile& storage, storage_type& expected, storage_type desired, memory_order success_order, memory_order failure_order) BOOST_NOEXCEPT
++    {
++        fence_before(success_order);
++        int success;
++        storage_type current;
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %2, %4\n\t"                 // current = *(&storage)
++            "cmpeq %2, %0, %3\n\t"            // success = current == expected
++            "wr_f %3\n\t"                     // lock_flag = success
++            "mov %2, %0\n\t"                  // expected = current
++            "beq %3, 2f\n\t"                  // if (success == 0) goto end
++            "lstl %1, %4\n\t"                 // storage = desired
++            "rd_f %3\n\t"                     // success = lock_success
++            "2:\n\t"
++            : "+r" (expected),   // %0
++              "+r" (desired),    // %1
++              "=&r" (current),   // %2
++              "=&r" (success)    // %3
++            : "m" (storage)      // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        if (success)
++            fence_after(success_order);
++        else
++            fence_after(failure_order);
++        return !!success;
++    }
++
++    static BOOST_FORCEINLINE bool compare_exchange_strong(
++        storage_type volatile& storage, storage_type& expected, storage_type desired, memory_order success_order, memory_order failure_order) BOOST_NOEXCEPT
++    {
++        int success;
++        storage_type current, tmp;
++        fence_before(success_order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "mov %5, %1\n\t"                  // tmp = desired
++            "lldl %2, %4\n\t"                 // current = *(&storage)
++            "cmpeq %2, %0, %3\n\t"            // success = current == expected
++            "wr_f %3\n\t"                     // lock_flag = success
++            "mov %2, %0\n\t"                  // expected = current
++            "beq %3, 2f\n\t"                  // if (success == 0) goto end
++            "lstl %1, %4\n\t"                 // storage = tmp
++            "rd_f %3\n\t"                     // success = lock_success
++            "beq %3, 3f\n\t"                  // if (tmp == 0) goto retry
++            "2:\n\t"
++
++            ".subsection 2\n\t"
++            "3: br 1b\n\t"
++            ".previous\n\t"
++
++            : "+r" (expected),   // %0
++              "=&r" (tmp),       // %1
++              "=&r" (current),   // %2
++              "=&r" (success)    // %3
++            : "m" (storage),     // %4
++              "r" (desired)      // %5
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        if (success)
++            fence_after(success_order);
++        else
++            fence_after(failure_order);
++        return !!success;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_add(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "addl %0, %4, %1\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_sub(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "subq %0, %4, %1\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_and(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "and %0, %4, %1\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_or(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "bis %0, %4, %1\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE storage_type fetch_xor(storage_type volatile& storage, storage_type v, memory_order order) BOOST_NOEXCEPT
++    {
++        storage_type original, modified, flag;
++        fence_before(order);
++        __asm__ __volatile__
++        (
++            "1:\n\t"
++            "lldl %0, %3\n\t"
++            "ldi %2, 1\n\t"
++            "wr_f %2\n\t"
++            "xor %0, %4, %1\n\t"
++            "lstl %1, %3\n\t"
++            "rd_f %2\n\t"
++            "beq %2, 2f\n\t"
++
++            ".subsection 2\n\t"
++            "2: br 1b\n\t"
++            ".previous\n\t"
++
++            : "=&r" (original),  // %0
++              "=&r" (modified),  // %1
++              "=&r" (flag)       // %2
++            : "m" (storage),     // %3
++              "r" (v)            // %4
++            : BOOST_ATOMIC_DETAIL_ASM_CLOBBER_CC
++        );
++        fence_after(order);
++        return original;
++    }
++
++    static BOOST_FORCEINLINE bool test_and_set(storage_type volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        return !!exchange(storage, (storage_type)1, order);
++    }
++
++    static BOOST_FORCEINLINE void clear(storage_type volatile& storage, memory_order order) BOOST_NOEXCEPT
++    {
++        store(storage, (storage_type)0, order);
++    }
++};
++
++} // namespace detail
++} // namespace atomics
++} // namespace boost
++
++#include <boost/atomic/detail/footer.hpp>
++
++#endif // BOOST_ATOMIC_DETAIL_CORE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
+diff --git a/libs/atomic/include/boost/atomic/detail/fence_arch_ops_gcc_sw64.hpp b/libs/atomic/include/boost/atomic/detail/fence_arch_ops_gcc_sw64.hpp
+new file mode 100644
+index 00000000..b17d679c
+--- /dev/null
++++ b/libs/atomic/include/boost/atomic/detail/fence_arch_ops_gcc_sw64.hpp
+@@ -0,0 +1,53 @@
++/*
++ * Distributed under the Boost Software License, Version 1.0.
++ * (See accompanying file LICENSE_1_0.txt or copy at
++ * http://www.boost.org/LICENSE_1_0.txt)
++ *
++ * Copyright (c) 2020 Andrey Semashev
++ */
++/*!
++ * \file   atomic/detail/fence_arch_ops_gcc_sw64.hpp
++ *
++ * This header contains implementation of the \c fence_arch_operations struct.
++ */
++
++#ifndef BOOST_ATOMIC_DETAIL_FENCE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
++#define BOOST_ATOMIC_DETAIL_FENCE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
++
++#include <boost/memory_order.hpp>
++#include <boost/atomic/detail/config.hpp>
++#include <boost/atomic/detail/header.hpp>
++
++#ifdef BOOST_HAS_PRAGMA_ONCE
++#pragma once
++#endif
++
++namespace boost {
++namespace atomics {
++namespace detail {
++
++//! Fence operations for Sunway
++struct fence_arch_operations_gcc_sw64
++{
++    static BOOST_FORCEINLINE void thread_fence(memory_order order) BOOST_NOEXCEPT
++    {
++        if (order != memory_order_relaxed)
++            __asm__ __volatile__ ("memb" ::: "memory");
++    }
++
++    static BOOST_FORCEINLINE void signal_fence(memory_order order) BOOST_NOEXCEPT
++    {
++        if (order != memory_order_relaxed)
++            __asm__ __volatile__ ("" ::: "memory");
++    }
++};
++
++typedef fence_arch_operations_gcc_sw64 fence_arch_operations;
++
++} // namespace detail
++} // namespace atomics
++} // namespace boost
++
++#include <boost/atomic/detail/footer.hpp>
++
++#endif // BOOST_ATOMIC_DETAIL_FENCE_ARCH_OPS_GCC_SW64_HPP_INCLUDED_
+diff --git a/libs/atomic/include/boost/atomic/detail/platform.hpp b/libs/atomic/include/boost/atomic/detail/platform.hpp
+index 82609586..629856e9 100644
+--- a/libs/atomic/include/boost/atomic/detail/platform.hpp
++++ b/libs/atomic/include/boost/atomic/detail/platform.hpp
+@@ -90,6 +90,10 @@
+ 
+ #define BOOST_ATOMIC_DETAIL_CORE_ARCH_BACKEND msvc_arm
+ 
++#elif defined(__GNUC__) && defined(__sw_64__)
++
++#define BOOST_ATOMIC_DETAIL_CORE_ARCH_BACKEND gcc_sw64
++
+ #endif
+ 
+ // Compiler-based backends
+diff --git a/libs/atomic/test/lockfree.cpp b/libs/atomic/test/lockfree.cpp
+index 297d7134..68e1e52e 100644
+--- a/libs/atomic/test/lockfree.cpp
++++ b/libs/atomic/test/lockfree.cpp
+@@ -189,6 +189,20 @@ void verify_lock_free(const char* type_name, int lock_free_macro_val, int lock_f
+ #define EXPECT_POINTER_LOCK_FREE 2
+ #define EXPECT_BOOL_LOCK_FREE 2
+ 
++#elif defined(__GNUC__) && defined(__sw_64__)
++
++#define EXPECT_CHAR_LOCK_FREE 2
++#define EXPECT_CHAR16_T_LOCK_FREE 2
++#define EXPECT_CHAR32_T_LOCK_FREE 2
++#define EXPECT_WCHAR_T_LOCK_FREE 2
++#define EXPECT_SHORT_LOCK_FREE 2
++#define EXPECT_INT_LOCK_FREE 2
++#define EXPECT_LONG_LOCK_FREE 2
++#define EXPECT_LLONG_LOCK_FREE 2
++#define EXPECT_INT128_LOCK_FREE 0
++#define EXPECT_POINTER_LOCK_FREE 2
++#define EXPECT_BOOL_LOCK_FREE 2
++
+ #else
+ 
+ #define EXPECT_CHAR_LOCK_FREE 0
+diff --git a/libs/config/checks/architecture/sw64.cpp b/libs/config/checks/architecture/sw64.cpp
+new file mode 100644
+index 00000000..bd30af6f
+--- /dev/null
++++ b/libs/config/checks/architecture/sw64.cpp
+@@ -0,0 +1,11 @@
++// sw64.cpp
++//
++// Copyright (c) 2022 Miao Changwei, UnionTech Software Technology Co., Ltd.
++//
++// Distributed under the Boost Software License Version 1.0. (See
++// accompanying file LICENSE_1_0.txt or copy at
++// http://www.boost.org/LICENSE_1_0.txt)
++
++#if !defined(__sw_64__) && !defined(__sw_64)
++#error "Not sw64"
++#endif
+diff --git a/libs/config/test/config_info.cpp b/libs/config/test/config_info.cpp
+index aa322fd1..1cc788e7 100644
+--- a/libs/config/test/config_info.cpp
++++ b/libs/config/test/config_info.cpp
+@@ -252,6 +252,7 @@ void print_compiler_macros()
+   PRINT_MACRO(_ARCH_PPC);
+   PRINT_MACRO(_ARCH_PPC64);
+   PRINT_MACRO(__sh__);
++  PRINT_MACRO(__sw_64__);
+   PRINT_MACRO(__370__);
+   PRINT_MACRO(__THW_370__);
+   // HP aCC:
+diff --git a/libs/context/CMakeLists.txt b/libs/context/CMakeLists.txt
+index 98e5ab8d..bf703321 100644
+--- a/libs/context/CMakeLists.txt
++++ b/libs/context/CMakeLists.txt
+@@ -50,7 +50,7 @@ unset(_default_abi)
+ 
+ ## Arch-and-model
+ 
+-set(_all_archs arm arm64 loongarch64 mips32 mips64 ppc32 ppc64 riscv64 s390x i386 x86_64 combined)
++set(_all_archs arm arm64 loongarch64 mips32 mips64 ppc32 ppc64 riscv64 s390x i386 x86_64 sw64 combined)
+ 
+ # Try at start to auto determine arch from CMake.
+ if(CMAKE_SYSTEM_PROCESSOR IN_LIST _all_archs)
+@@ -69,12 +69,15 @@ else()
+     set(_default_arch arm64)
+   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^mips")
+     set(_default_arch mips64)
++  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "sw_64" OR
++    CMAKE_SYSTEM_PROCESSOR STREQUAL "sw64")
++    set(_default_arch sw64)
+   else()
+     set(_default_arch x86_64)
+   endif()
+ endif()
+ 
+-set(BOOST_CONTEXT_ARCHITECTURE "${_default_arch}" CACHE STRING "Boost.Context architecture (arm, arm64, loongarch64, mips32, mips64, ppc32, ppc64, riscv64, s390x, i386, x86_64, combined)")
++set(BOOST_CONTEXT_ARCHITECTURE "${_default_arch}" CACHE STRING "Boost.Context architecture (arm, arm64, loongarch64, mips32, mips64, ppc32, ppc64, riscv64, s390x, i386, x86_64, sw64 combined)")
+ set_property(CACHE BOOST_CONTEXT_ARCHITECTURE PROPERTY STRINGS ${_all_archs})
+ 
+ unset(_all_archs)
+diff --git a/libs/context/build/Jamfile.v2 b/libs/context/build/Jamfile.v2
+index c07847ab..0fe5a58b 100644
+--- a/libs/context/build/Jamfile.v2
++++ b/libs/context/build/Jamfile.v2
+@@ -79,8 +79,8 @@ local rule default_abi ( )
+     local tmp = sysv ;
+     if [ os.name ] = "NT" { tmp = ms ; }
+     else if [ os.name ] = "CYGWIN" { tmp = ms ; }
+-    else if [ os.platform ] = "ARM" { tmp = aapcs ; }
+-    else if [ os.platform ] = "ARM64" { tmp = aapcs ; }
++    else if [ os.platform ] in ARM ARM64 { tmp = aapcs ; }
++    else if [ os.platform ] = "SW64" { tmp = aapcs ; }
+     else if [ os.platform ] = "MIPS32" { tmp = o32 ; }
+     else if [ os.platform ] = "MIPS64" { tmp = n64 ; }
+     return $(tmp) ;
+@@ -183,6 +183,30 @@ alias asm_sources
+      <toolset>msvc
+    ;
+ 
++# SW64
++# SW64/AAPCS/ELF
++alias asm_sources
++   : asm/make_sw64_aapcs_elf_gas.S
++     asm/jump_sw64_aapcs_elf_gas.S
++     asm/ontop_sw64_aapcs_elf_gas.S
++   : <abi>aapcs
++     <address-model>64
++     <architecture>sw64
++     <binary-format>elf
++     <toolset>clang
++   ;
++
++alias asm_sources
++   : asm/make_sw64_aapcs_elf_gas.S
++     asm/jump_sw64_aapcs_elf_gas.S
++     asm/ontop_sw64_aapcs_elf_gas.S
++   : <abi>aapcs
++     <address-model>64
++     <architecture>sw64
++     <binary-format>elf
++     <toolset>gcc
++   ;
++
+ # ARM64
+ # ARM64/AAPCS/ELF
+ alias asm_sources
+diff --git a/libs/context/build/architecture.jam b/libs/context/build/architecture.jam
+index d1dd356b..c1674145 100644
+--- a/libs/context/build/architecture.jam
++++ b/libs/context/build/architecture.jam
+@@ -79,6 +79,10 @@ rule deduce-architecture ( properties * )
+         {
+             return <architecture>sparc ;
+         }
++        else if [ configure.builds /boost/architecture//sw64 : $(properties) : sw64 ]
++        {
++            return <architecture>sw64 ;
++        }
+         else if [ configure.builds /boost/architecture//x86 : $(properties) : x86 ]
+         {
+             return <architecture>x86 ;
+diff --git a/libs/context/src/asm/jump_sw64_aapcs_elf_gas.S b/libs/context/src/asm/jump_sw64_aapcs_elf_gas.S
+new file mode 100644
+index 00000000..70c9d9b0
+--- /dev/null
++++ b/libs/context/src/asm/jump_sw64_aapcs_elf_gas.S
+@@ -0,0 +1,86 @@
++.text
++.align  2
++.global jump_fcontext
++.type   jump_fcontext, %function
++jump_fcontext:
++    # prepare stack for GP + FPU
++    #ldih $29,0($27)
++    #ldi $29,0($29)
++    subl  $sp, 0x98, $sp
++
++    # save $f2-$f9
++    fstd  $f2, 0x00($sp)
++    fstd  $f3, 0x08($sp)
++    fstd  $f4, 0x10($sp)
++    fstd  $f5, 0x18($sp)
++    fstd  $f6, 0x20($sp)
++    fstd  $f7, 0x28($sp)
++    fstd  $f8, 0x30($sp)
++    fstd  $f9, 0x38($sp)
++
++    # save $9-$15, fp,$26
++    stl  $9, 0x40($sp)
++    stl  $10, 0x48($sp)
++    stl  $11, 0x50($sp)
++    stl  $12, 0x58($sp)
++    stl  $13, 0x60($sp)
++    stl  $14, 0x68($sp)
++    stl  $15, 0x70($sp)
++    stl  $fp, 0x78($sp)
++    stl  $16, 0x80($sp)  #save jump_fcontext return address
++    stl  $26, 0x88($sp)
++
++    # save LR as PC
++    stl  $26, 0x90($sp)
++
++    # store RSP (pointing to context-data) in $16
++    mov  $sp, $20
++
++
++    # restore RSP (pointing to context-data) from $17
++    mov  $17, $sp
++
++    # load $f2-$f9
++    fldd $f2, 0x00($sp)
++    fldd $f3, 0x08($sp)
++    fldd $f4, 0x10($sp)
++    fldd $f5, 0x18($sp)
++    fldd $f6, 0x20($sp)
++    fldd $f7, 0x28($sp)
++    fldd $f8, 0x30($sp)
++    fldd $f9, 0x38($sp)
++
++    # load $9-$15, fp,$26
++    ldl  $9, 0x40($sp)
++    ldl  $10, 0x48($sp)
++    ldl  $11, 0x50($sp)
++    ldl  $12, 0x58($sp)
++    ldl  $13, 0x60($sp)
++    ldl  $14, 0x68($sp)
++    ldl  $15, 0x70($sp)
++    ldl  $fp, 0x78($sp)
++    ldl  $26, 0x88($sp)
++
++    # pass transfer_t as first arg in context function
++    # to store $1,$2 to $16 address
++    ldl $16, 0x80($sp) #load $16, store return struct do return address
++    stl $20,0($16)
++    stl $18,8($16)
++
++    # pass transfer_t as first arg in context function,such as f1,f2,f3
++    # $16 == FCTX, $17 == DATA
++    mov $20,$16   #$16 $17 as first and second arg
++    mov $18,$17
++
++
++    # load pc
++    ldl $27, 0x90($sp)
++
++
++    # restore stack from GP + FPU
++    addl  $sp, 0x98, $sp
++
++    ret  $31,($27),0x1 //jmp $31, ($27) //ret ($27)
++.size   jump_fcontext,.-jump_fcontext
++# Mark that we don't need executable stack.
++.section .note.GNU-stack,"",%progbits
+diff --git a/libs/context/src/asm/make_sw64_aapcs_elf_gas.S b/libs/context/src/asm/make_sw64_aapcs_elf_gas.S
+new file mode 100644
+index 00000000..1930f96b
+--- /dev/null
++++ b/libs/context/src/asm/make_sw64_aapcs_elf_gas.S
+@@ -0,0 +1,37 @@
++.text
++.align  2
++.global make_fcontext
++.type   make_fcontext, %function
++make_fcontext:
++    #ldih $29,0($27)
++    #ldi $29,0($29)
++    # shift address in $16 (allocated stack) to lower 16 byte boundary
++    bic $16, 0xf,$16
++
++    # reserve space for context-data on context-stack
++    subl  $16, 0x98,$16
++
++    # third arg of make_fcontext() == address of context-function
++    # store address as a PC to jump in
++    stl  $18, 0x90($16)
++
++    # save address of finish as return-address for context-function
++    # will be entered after context-function returns (LR register)
++    ldi  $17, finish
++    stl  $17, 0x88($16)
++
++    stl  $16, 0x80($16)
++
++    mov  $16, $0
++
++    ret  $31,($26),1 //jump ($26) // return pointer to context-data ($16)
++
++finish:
++    # exit code is zero
++    mov  0, $0
++    # exit application
++    call  _exit #ldi $27,_exit #jmp ($27)
++
++.size   make_fcontext,.-make_fcontext
++# Mark that we don't need executable stack.
++.section .note.GNU-stack,"",%progbits
+diff --git a/libs/context/src/asm/ontop_sw64_aapcs_elf_gas.S b/libs/context/src/asm/ontop_sw64_aapcs_elf_gas.S
+new file mode 100644
+index 00000000..373c899e
+--- /dev/null
++++ b/libs/context/src/asm/ontop_sw64_aapcs_elf_gas.S
+@@ -0,0 +1,85 @@
++.text
++.align  2
++.global ontop_fcontext
++.type   ontop_fcontext, %function
++ontop_fcontext:
++    # prepare stack for GP + FPU
++    #ldih $29,0($27)
++    #ldi $29,0($29)
++    subl  $sp, 0x98, $sp
++
++    # save $f2-$f9
++    fstd  $f2, 0x00($sp)
++    fstd  $f3, 0x08($sp)
++    fstd  $f4, 0x10($sp)
++    fstd  $f5, 0x18($sp)
++    fstd  $f6, 0x20($sp)
++    fstd  $f7, 0x28($sp)
++    fstd  $f8, 0x30($sp)
++    fstd  $f9, 0x38($sp)
++
++    # save $9-$15, fp,$26
++    stl  $9, 0x40($sp)
++    stl  $10, 0x48($sp)
++    stl  $11, 0x50($sp)
++    stl  $12, 0x58($sp)
++    stl  $13, 0x60($sp)
++    stl  $14, 0x68($sp)
++    stl  $15, 0x70($sp)
++    stl  $fp, 0x78($sp)
++    stl  $16, 0x80($sp)  #save ontop_fcontext return address
++    stl  $26, 0x88($sp)
++
++    # save LR as PC
++    stl  $26, 0x90($sp)
++
++    # store RSP (pointing to context-data) in $16
++    mov  $sp, $20
++
++
++    # restore RSP (pointing to context-data) from $17
++    mov  $17, $sp
++
++    # load $f2-$f9
++    fldd $f2, 0x00($sp)
++    fldd $f3, 0x08($sp)
++    fldd $f4, 0x10($sp)
++    fldd $f5, 0x18($sp)
++    fldd $f6, 0x20($sp)
++    fldd $f7, 0x28($sp)
++    fldd $f8, 0x30($sp)
++    fldd $f9, 0x38($sp)
++
++    # load $9-$15, fp,$26
++    ldl  $9, 0x40($sp)
++    ldl  $10, 0x48($sp)
++    ldl  $11, 0x50($sp)
++    ldl  $12, 0x58($sp)
++    ldl  $13, 0x60($sp)
++    ldl  $14, 0x68($sp)
++    ldl  $15, 0x70($sp)
++    ldl  $fp, 0x78($sp)
++    ldl  $26, 0x88($sp)
++
++    # pass transfer_t as first arg in context function
++    # to store $1,$2 to $16 address
++    ldl $16, 0x80($sp) #load $16, store return struct do return address
++    stl $20,0($16)
++    stl $18,8($16)
++
++    # pass transfer_t as first arg in context function,such as f1,f2,f3
++    # $16 == FCTX, $17 == DATA
++    mov $20,$17   #$16 $17 $18 as first and second arg
++
++
++    # skip pc
++    mov $19, $27
++
++
++    # restore stack from GP + FPU
++    addl  $sp, 0x98, $sp
++
++    ret  $31,($27),0x1 //jmp $31, ($27) //ret ($27)
++.size   ontop_fcontext,.-ontop_fcontext
++# Mark that we don't need executable stack.
++.section .note.GNU-stack,"",%progbits
+diff --git a/libs/fiber/include/boost/fiber/detail/cpu_relax.hpp b/libs/fiber/include/boost/fiber/detail/cpu_relax.hpp
+index 54cecf12..4385d2a8 100644
+--- a/libs/fiber/include/boost/fiber/detail/cpu_relax.hpp
++++ b/libs/fiber/include/boost/fiber/detail/cpu_relax.hpp
+@@ -66,6 +66,8 @@ namespace detail {
+ # else
+ #  define cpu_relax() asm volatile ("pause" ::: "memory");
+ # endif
++#elif BOOST_ARCH_SW64
++# define cpu_relax() asm volatile ("nop" ::: "memory");
+ #else
+ # define cpu_relax() { \
+    static constexpr std::chrono::microseconds us0{ 0 }; \
+diff --git a/libs/numeric/interval/include/boost/numeric/interval/detail/sw64_rounding_control.hpp b/libs/numeric/interval/include/boost/numeric/interval/detail/sw64_rounding_control.hpp
+new file mode 100644
+index 00000000..dd8dbf71
+--- /dev/null
++++ b/libs/numeric/interval/include/boost/numeric/interval/detail/sw64_rounding_control.hpp
+@@ -0,0 +1,93 @@
++/* Boost interval/detail/sw64_rounding_control.hpp file
++ *
++ * Copyright 2005 Felix Höfling, Guillaume Melquiond
++ *
++ * Distributed under the Boost Software License, Version 1.0.
++ * (See accompanying file LICENSE_1_0.txt or
++ * copy at http://www.boost.org/LICENSE_1_0.txt)
++ */
++
++#ifndef BOOST_NUMERIC_INTERVAL_DETAIL_SW64_ROUNDING_CONTROL_HPP
++#define BOOST_NUMERIC_INTERVAL_DETAIL_SW64_ROUNDING_CONTROL_HPP
++
++#if !defined(__sw_64) && !defined(__sw_64__)
++#error This header only works on Sunway CPUs.
++#endif
++
++#if defined(__GNUC__)
++
++#include <float.h> // write_rnd() and read_rnd()
++
++namespace boost {
++namespace numeric {
++namespace interval_lib {
++
++namespace detail {
++    typedef union {
++    ::boost::long_long_type imode;
++    double dmode;
++    } rounding_mode_struct;
++
++    // set bits 59-58 (DYN),
++    // clear all exception bits and disable overflow (51) and inexact exceptions (62)
++    static const rounding_mode_struct mode_upward      = { 0x4C08000000000000LL };
++    static const rounding_mode_struct mode_downward    = { 0x4408000000000000LL };
++    static const rounding_mode_struct mode_to_nearest  = { 0x4808000000000000LL };
++    static const rounding_mode_struct mode_toward_zero = { 0x4008000000000000LL };
++
++    struct sw64_rounding_control
++    {
++    typedef double rounding_mode;
++
++    static void set_rounding_mode(const rounding_mode mode)
++    { __asm__ __volatile__ ("wfpcr %0" : : "f"(mode)); }
++
++    static void get_rounding_mode(rounding_mode& mode)
++    { __asm__ __volatile__ ("rfpcr %0" : "=f"(mode)); }
++
++    static void downward()    { set_rounding_mode(mode_downward.dmode);    }
++    static void upward()      { set_rounding_mode(mode_upward.dmode);      }
++    static void to_nearest()  { set_rounding_mode(mode_to_nearest.dmode);  }
++    static void toward_zero() { set_rounding_mode(mode_toward_zero.dmode); }
++    };
++} // namespace detail
++
++extern "C" {
++  float rintf(float);
++  double rint(double);
++  long double rintl(long double);
++}
++
++template<>
++struct rounding_control<float>:
++  detail::sw64_rounding_control
++{
++  static float force_rounding(const float r)
++  { volatile float _r = r; return _r; }
++  static float to_int(const float& x) { return rintf(x); }
++};
++
++template<>
++struct rounding_control<double>:
++  detail::sw64_rounding_control
++{
++  static const double & force_rounding(const double& r) { return r; }
++  static double to_int(const double& r) { return rint(r); }
++};
++
++template<>
++struct rounding_control<long double>:
++  detail::sw64_rounding_control
++{
++  static const long double & force_rounding(const long double& r) { return r; }
++  static long double to_int(const long double& r) { return rintl(r); }
++};
++
++} // namespace interval_lib
++} // namespace numeric
++} // namespace boost
++
++#undef BOOST_NUMERIC_INTERVAL_NO_HARDWARE
++#endif
++
++#endif /* BOOST_NUMERIC_INTERVAL_DETAIL_SW64_ROUNDING_CONTROL_HPP */
+diff --git a/libs/numeric/interval/include/boost/numeric/interval/hw_rounding.hpp b/libs/numeric/interval/include/boost/numeric/interval/hw_rounding.hpp
+index 46d452ee..2cf1e07b 100644
+--- a/libs/numeric/interval/include/boost/numeric/interval/hw_rounding.hpp
++++ b/libs/numeric/interval/include/boost/numeric/interval/hw_rounding.hpp
+@@ -32,6 +32,8 @@
+ #  include <boost/numeric/interval/detail/alpha_rounding_control.hpp>
+ #elif defined(ia64) || defined(__ia64) || defined(__ia64__)
+ #  include <boost/numeric/interval/detail/ia64_rounding_control.hpp>
++#elif defined(__sw_64) || defined(__sw_64__)
++#  include <boost/numeric/interval/detail/sw64_rounding_control.hpp>
+ #endif
+ 
+ #if defined(BOOST_NUMERIC_INTERVAL_NO_HARDWARE) && !defined(BOOST_NO_FENV_H)
+diff --git a/libs/predef/include/boost/predef/architecture/sw64.h b/libs/predef/include/boost/predef/architecture/sw64.h
+new file mode 100644
+index 00000000..deff8c9a
+--- /dev/null
++++ b/libs/predef/include/boost/predef/architecture/sw64.h
+@@ -0,0 +1,52 @@
++/*
++Copyright Rene Rivera 2008-2015
++Distributed under the Boost Software License, Version 1.0.
++(See accompanying file LICENSE_1_0.txt or copy at
++http://www.boost.org/LICENSE_1_0.txt)
++*/
++
++#ifndef BOOST_PREDEF_ARCHITECTURE_ALPHA_H
++#define BOOST_PREDEF_ARCHITECTURE_ALPHA_H
++
++#include <boost/predef/version_number.h>
++#include <boost/predef/make.h>
++
++/* tag::reference[]
++= `BOOST_ARCH_SW64`
++
++[options="header"]
++|===
++| {predef_symbol} | {predef_version}
++| `+__sw_64__+` | {predef_detection}
++| `+__sw_64+` | {predef_detection}
++
++| `+__sw_64_sw6a__+` | 1.0.0
++| `+__sw_64_sw6b__+` | 2.0.0
++|===
++*/ // end::reference[]
++
++#define BOOST_ARCH_SW64 BOOST_VERSION_NUMBER_NOT_AVAILABLE
++
++#if defined(__sw_64__) || defined(__sw_64)
++#   undef BOOST_ARCH_SW64
++#   if !defined(BOOST_ARCH_SW64) && defined(__sw_64_sw6a__)
++#       define BOOST_ARCH_SW64 BOOST_VERSION_NUMBER(1,0,0)
++#   endif
++#   if !defined(BOOST_ARCH_SW64) && defined(__sw_64_sw6b__)
++#       define BOOST_ARCH_SW64 BOOST_VERSION_NUMBER(2,0,0)
++#   endif
++#   if !defined(BOOST_ARCH_SW64)
++#       define BOOST_ARCH_SW64 BOOST_VERSION_NUMBER_AVAILABLE
++#   endif
++#endif
++
++#if BOOST_ARCH_SW64
++#   define BOOST_ARCH_SW64_AVAILABLE
++#endif
++
++#define BOOST_ARCH_SW64_NAME "SUNWAY"
++
++#endif
++
++#include <boost/predef/detail/test.h>
++BOOST_PREDEF_DECLARE_TEST(BOOST_ARCH_SW64,BOOST_ARCH_SW64_NAME)
+diff --git a/tools/build/src/engine/jam.h b/tools/build/src/engine/jam.h
+index e1b76cb0..8600f8f1 100644
+--- a/tools/build/src/engine/jam.h
++++ b/tools/build/src/engine/jam.h
+@@ -442,6 +442,11 @@
+     #define OSPLAT "OSPLAT=PARISC"
+ #endif
+ 
++#if defined( __sw_64   ) || \
++    defined( __sw_64__ )
++    #define OSPLAT "OSPLAT=SW64"
++#endif
++
+ #ifndef OSPLAT
+     #define OSPLAT ""
+ #endif
+diff --git a/tools/build/src/tools/features/architecture-feature.jam b/tools/build/src/tools/features/architecture-feature.jam
+index a47c4bfd..a60a0e13 100644
+--- a/tools/build/src/tools/features/architecture-feature.jam
++++ b/tools/build/src/tools/features/architecture-feature.jam
+@@ -48,7 +48,10 @@ feature.feature architecture
+         # z Systems (aka s390x)
+         s390x
+ 
+-        # Combined architecture(s)
++        # Sumway
++        sw64
++
++	# Combined architecture(s)
+         arm+x86
+     :
+         propagated optional
+diff --git a/tools/build/src/tools/features/instruction-set-feature.jam b/tools/build/src/tools/features/instruction-set-feature.jam
+index ad3aadb8..5455ccdb 100644
+--- a/tools/build/src/tools/features/instruction-set-feature.jam
++++ b/tools/build/src/tools/features/instruction-set-feature.jam
+@@ -69,6 +69,9 @@ feature.feature instruction-set
+         # z Systems (aka s390x)
+         z196 zEC12 z13 z14 z15
+ 
++        # Sunway
++        sw6a sw6b sw4d
++
+     :
+         propagated optional
+     ;
+-- 
+2.47.2
+
