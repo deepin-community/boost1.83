@@ -9,4 +9,8 @@ fix_extension.patch
 60.patch
 70-boost-causing-ftbfs-signal2-part1.patch
 71-boost-causing-ftbfs-signal2-part2.patch
+0013-Support-numpy-2.0.0b1.patch
+0014-Another-fix-for-numpy-2.0.patch
+0015-Use-static-const-for-next-prior-from-C-17.patch
+0016-Fix-build-on-clang-19-which-checks-more-things-in-un.patch
 0001-feat-add-sw64-support.patch

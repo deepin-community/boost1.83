@@ -1,0 +1,23 @@
+From: Arvid Norlander <arvid-norlander@users.noreply.github.com>
+Date: Fri, 8 Nov 2024 16:48:43 +0100
+Subject: Fix build on clang-19 (which checks more things in uninstantiated
+ templates)
+
+Fixes issue #402
+---
+ libs/thread/include/boost/thread/future.hpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libs/thread/include/boost/thread/future.hpp b/libs/thread/include/boost/thread/future.hpp
+index bbf0ffc..989baba 100644
+--- a/libs/thread/include/boost/thread/future.hpp
++++ b/libs/thread/include/boost/thread/future.hpp
+@@ -4669,7 +4669,7 @@ namespace detail
+       }
+       run_it& operator=(BOOST_THREAD_RV_REF(run_it) x) BOOST_NOEXCEPT {
+         if (this != &x) {
+-          that_=x.that;
++          that_=x.that_;
+           x.that_.reset();
+         }
+         return *this;

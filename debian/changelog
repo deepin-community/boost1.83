@@ -1,3 +1,15 @@
+boost1.83 (1.83.0-4deepin3) unstable; urgency=medium
+
+  * Sync patches from 1.83.0-4.1, 1.83.0-4.2 and 1.83.0-5. Changes includes:
+    - Fix FTBFS with NumPy 2.x. Closes: #1094654.
+    - Another fix for numpy 2.0. Closes: #1099671.
+      - Compare pointers directly instead of using PyArray_EquivTypes
+    - Enable context library on ppc64. Closes: #1071542.
+    - Use static const for next/prior from C++17. Closes: #1093824.
+    - [ebf48a2] Fix build on clang-19. (Closes: #1097629)
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Wed, 29 Oct 2025 11:02:19 +0800
+
 boost1.83 (1.83.0-4deepin2) unstable; urgency=medium
 
   * feat: add sw64 support.
